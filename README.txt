@@ -23,4 +23,7 @@ Typical usage looks like this::
     print (l[:2] + ['stealthy'] + l[2:]).map_reduce(mr) # 'the quick stealthy brown fox'
 
 
-See the pydocs for more examples.
+See the pydocs for more examples:
+
+https://github.com/pschanely/ScenicOverlook/blob/master/scenicoverlook/__init__.py
+
