@@ -11,6 +11,4 @@ setup(
     license='LICENSE.txt', # (3 clause BSD)
     description='A library for incremental, in-memory map-reduces',
     long_description=open('README.txt').read(),
-    install_requires=[
-    ],
 )
