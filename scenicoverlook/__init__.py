@@ -1,7 +1,7 @@
-import doctest
-
 from collections import defaultdict, namedtuple
-
+import doctest
+import functools
+import itertools
 
 def _identity(x):
     return x
@@ -9,6 +9,13 @@ def _identity(x):
 _NO_VAL = object()
 
 class MapReduceLogic(object):
+    """
+    Instances of this class simply hold the map and reduce functions,
+    and for a defualt value when the reduce function does not have
+    enough inputs. Different instances of this class are considered
+    to be different (even if they contain the same functions), so be
+    sure to create only one per use-case, and reuse it.
+    """
     __slots__ = ('reducer', 'mapper', 'initializer')
     def __init__(self, reducer=None, mapper=_identity, initializer=None):
         if reduce is None:
@@ -19,6 +26,7 @@ class MapReduceLogic(object):
     def __iter__(self):
         return (self.reducer, self.mapper, self.initializer).__iter__()
     
+@functools.total_ordering
 class ViewableList(object):
 
     """
@@ -90,6 +98,28 @@ class ViewableList(object):
     [3, 5]
     >>> l[3:7].map_reduce(mr)
     [4, 5]
+
+    The current implementation does not re-balance the tree as you modify
+    it, which will lead to degraded performance over time; you should
+    call balanced() after making many modifications:
+
+    >>> l = ViewableList([1, 2, 3, 4])
+    >>> l.max_depth()
+    2
+    >>> l += [4]
+    >>> l += [5]
+    >>> l += [6]
+    >>> l += [7]
+    >>> l.max_depth()
+    6
+    >>> l.balanced().max_depth()
+    3
+
+    Future Work:
+    * Smarter and/or incremental balancing
+    * New collection type: ViewableDictionary
+    * New collection type: ViewableSet
+
     """
     
     __slots__ = ('_left', '_right', '_val', '_count','_reducevals')
@@ -97,7 +127,6 @@ class ViewableList(object):
     def __init__(self, values=None, pair=None):
         self._val = _NO_VAL
         self._reducevals = {}
-        #self._logic = logic
         self._left = self._right = None
         if pair is not None:
             self._left, self._right = pair
@@ -113,12 +142,20 @@ class ViewableList(object):
             self._count = len(values)
 
     def __len__(self):
+        '''
+        >>> len(ViewableList([]))
+        0
+        >>> len(ViewableList([1,2]))
+        2
+        >>> len(ViewableList([1,2]) + ViewableList([3]))
+        3
+        '''
         return self._count
 
     def __getitem__(self, index):
         if isinstance(index, slice):
             if index.step is not None and index.step != 1:
-                return ViewableList(self.tolist()[index], None)
+                return ViewableList(self.to_list()[index], None)
             count = self._count
             start, end, _ = index.indices(count)
             if self._left is None:
@@ -149,64 +186,89 @@ class ViewableList(object):
         return ViewableList(None, (self, other))
 
     def __repr__(self):
-        return 'ViewableList({0})'.format(str(self.tolist()))
+        return 'ViewableList({0})'.format(str(self.to_list()))
 
     def __str__(self):
         return self.__repr__()
 
     def __iter__(self):
+        '''
+        >>> list(ViewableList([]) + ViewableList([3]))
+        [3]
+        '''
         left, val, right = self._left, self._val, self._right
-        for i in left:
-            yield i
-        yield val
-        for i in right:
-            yield i
-
-    def __ne__(self, other):
-        raise Exception()
-        return compare_pvector(self, other, operator.ne)
+        if left:
+            for i in left:
+                yield i
+        if val is not _NO_VAL:
+            yield val
+        if right:
+            for i in right:
+                yield i
 
     def __eq__(self, other):
-        raise Exception()
-        return self is other or compare_pvector(self, other, operator.eq)
+        '''
+        >>> ViewableList([]) != ViewableList([1])
+        True
+        >>> ViewableList([1,3]) != ViewableList([1,2])
+        True
+        >>> ViewableList([1,2]) + ViewableList([3]) == ViewableList([1,2,3])
+        True
+        >>> ViewableList([]) + ViewableList([3]) == ViewableList([3])
+        True
+        '''
+        sentinel = object()
+        return all(a == b for a, b in itertools.izip_longest(
+            self.__iter__(), other.__iter__(), fillvalue=sentinel))
 
-    def __gt__(self, other):
-        raise Exception()
-        return compare_pvector(self, other, operator.gt)
+    def __hash__(self):
+        '''
+        >>> hash(ViewableList([1,2]) + ViewableList([3])) == hash(ViewableList([1,2,3]))
+        True
+        >>> hash(ViewableList([1])) != hash(ViewableList([2]))
+        True
+        '''
+        return hash(tuple(self.to_list()))
 
     def __lt__(self, other):
-        raise Exception()
-        return compare_pvector(self, other, operator.lt)
-
-    def __ge__(self, other):
-        raise Exception()
-        return compare_pvector(self, other, operator.ge)
-
-    def __le__(self, other):
-        raise Exception()
-        return compare_pvector(self, other, operator.le)
+        '''
+        >>> ViewableList([]) < ViewableList([3])
+        True
+        >>> ViewableList([3]) < ViewableList([3])
+        False
+        >>> ViewableList([4]) < ViewableList([3, 4])
+        False
+        >>> # @functools.total_ordering gives us other comparison operators too:
+        >>> ViewableList([3]) >= ViewableList([3])
+        True
+        >>> ViewableList([3]) >= ViewableList([3, 0])
+        False
+        '''
+        sentinel = object()
+        for a, b in itertools.izip(self.__iter__(), other.__iter__()):
+            if a < b:
+                return True
+            elif b < a:
+                return False
+        return len(self) < len(other)
 
     def __mul__(self, times):
-        raise Exception()
+        raise NotImplementedError()
 
     __rmul__ = __mul__
 
-    def tolist(self):
+    def to_list(self):
         ret = []
-        left, val, right = self._left, self._val, self._right
-        if left is not None:
-            ret.extend(left.tolist())
-        if val is not _NO_VAL:
-            ret.append(val)
-        if right is not None:
-            ret.extend(right.tolist())
+        def visit(node):
+            left, val, right = node._left, node._val, node._right
+            if left is not None:
+                visit(left)
+            if val is not _NO_VAL:
+                ret.append(val)
+            if right is not None:
+                visit(right)
+        visit(self)
         return ret
-
-    def _totuple(self):
-        return tuple(self.tolist())
-
-    def __hash__(self):
-        return hash(self._totuple())
 
     def map_reduce(self, logic):
         rv = self._reducevals.get(logic, _NO_VAL)
@@ -221,7 +283,25 @@ class ViewableList(object):
         self._reducevals[logic] = ret
         return ret
 
+    def max_depth(self):
+        '''
+        >>> ViewableList([3]).max_depth()
+        0
+        >>> ViewableList([3,4]).max_depth()
+        1
+        '''
+        left, right = self._left, self._right
+        depth = 0
+        if left:
+            depth = max(depth, left.max_depth() + 1)
+        if left:
+            depth = max(depth, right.max_depth() + 1)
+        return depth
     
+    def balanced(self):
+        return ViewableList(self.to_list())
+
+
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
