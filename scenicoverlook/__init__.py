@@ -3,29 +3,6 @@ import doctest
 import functools
 import itertools
 
-def _identity(x):
-    return x
-
-_NO_VAL = object()
-
-class MapReduceLogic(object):
-    """
-    Instances of this class simply hold the map and reduce functions,
-    and for a defualt value when the reduce function does not have
-    enough inputs. Different instances of this class are considered
-    to be different (even if they contain the same functions), so be
-    sure to create only one per use-case, and reuse it.
-    """
-    __slots__ = ('reducer', 'mapper', 'initializer')
-    def __init__(self, reducer=None, mapper=_identity, initializer=None):
-        if reduce is None:
-            raise ValueError('reducer may not be None')
-        self.reducer = reducer
-        self.mapper = mapper
-        self.initializer = initializer
-    def __iter__(self):
-        return (self.reducer, self.mapper, self.initializer).__iter__()
-    
 @functools.total_ordering
 class ViewableList(object):
 
@@ -302,6 +279,29 @@ class ViewableList(object):
         return ViewableList(self.to_list())
 
 
+def _identity(x):
+    return x
+
+_NO_VAL = object()
+
+class MapReduceLogic(object):
+    """
+    Instances of this class simply hold the map and reduce functions,
+    and for a defualt value when the reduce function does not have
+    enough inputs. Different instances of this class are considered
+    to be different (even if they contain the same functions), so be
+    sure to create only one per use-case, and reuse it.
+    """
+    __slots__ = ('reducer', 'mapper', 'initializer')
+    def __init__(self, reducer=None, mapper=_identity, initializer=None):
+        if reduce is None:
+            raise ValueError('reducer may not be None')
+        self.reducer = reducer
+        self.mapper = mapper
+        self.initializer = initializer
+    def __iter__(self):
+        return (self.reducer, self.mapper, self.initializer).__iter__()
+    
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
