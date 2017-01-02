@@ -2,6 +2,8 @@ from collections import defaultdict, namedtuple
 import doctest
 import functools
 import itertools
+import heapq
+import math
 
 @functools.total_ordering
 class ViewableList(object):
@@ -76,37 +78,20 @@ class ViewableList(object):
     >>> l[3:7].map_reduce(mr)
     [4, 5]
 
-    The current implementation does not re-balance the tree as you modify
-    it, which will lead to degraded performance over time; you should
-    call balanced() after making many modifications:
-
-    >>> l = ViewableList([1, 2, 3, 4])
-    >>> l.max_depth()
-    2
-    >>> l += [4]
-    >>> l += [5]
-    >>> l += [6]
-    >>> l += [7]
-    >>> l.max_depth()
-    6
-    >>> l.balanced().max_depth()
-    3
-
     Future Work:
-    * Smarter and/or incremental balancing
     * New collection type: ViewableDictionary
     * New collection type: ViewableSet
 
     """
     
-    __slots__ = ('_left', '_right', '_val', '_count','_reducevals')
+    __slots__ = ('_left', '_right', '_val', '_depth', '_count','_reducevals')
 
-    def __init__(self, values=None, pair=None):
+    def __init__(self, values=None, _pair=None):
         self._val = _NO_VAL
         self._reducevals = {}
         self._left = self._right = None
-        if pair is not None:
-            self._left, self._right = pair
+        if _pair is not None:
+            self._left, self._right = _pair
             self._count = self._left._count + self._right._count
         if values is not None:
             if len(values) <= 1:
@@ -114,9 +99,13 @@ class ViewableList(object):
                     self._val = values[0]
             else:
                 mid = len(values) / 2
-                self._left = ViewableList(values[:mid], None)
-                self._right = ViewableList(values[mid:], None)
+                self._left = _treeify([ViewableList((v,)) for v in values[:mid]])
+                self._right = _treeify([ViewableList((v,)) for v in values[mid:]])
             self._count = len(values)
+        if self._left is not None:
+            self._depth = 1 + max(self._left.max_depth(), self._right.max_depth())
+        else:
+            self._depth = 0
 
     def __len__(self):
         '''
@@ -158,9 +147,26 @@ class ViewableList(object):
                 raise IndexError()
             
     def __add__(self, other):
+        '''
+        >>> (ViewableList([]) + ViewableList([3])).max_depth()
+        0
+        >>> # Target depth here is 2, actual is 3: we can be off by one level
+        >>> (ViewableList([0]) + ViewableList([1,2,3])).max_depth()
+        3
+        >>> # Target depth is 3, actual is 4: we can be off by one level
+        >>> (ViewableList([0,1,2,3,4]) + ViewableList([5])).max_depth()
+        4
+        >>> # Target depth is 3, actual is 5, rebalance down to 4
+        >>> (ViewableList([0,1,2,3,4]) + ViewableList([5]) + ViewableList([6])).max_depth()
+        4
+        '''
         if not isinstance(other, ViewableList):
             other = ViewableList(other, None)
-        return ViewableList(None, (self, other))
+        if self._count == 0:
+            return other
+        if other._count == 0:
+            return self
+        return ViewableList(None, (self, other)).balanced()
 
     def __repr__(self):
         return 'ViewableList({0})'.format(str(self.to_list()))
@@ -266,21 +272,86 @@ class ViewableList(object):
         0
         >>> ViewableList([3,4]).max_depth()
         1
+        >>> ViewableList([1,2,3,4]).max_depth()
+        2
         '''
-        left, right = self._left, self._right
-        depth = 0
-        if left:
-            depth = max(depth, left.max_depth() + 1)
-        if left:
-            depth = max(depth, right.max_depth() + 1)
-        return depth
+        return self._depth
     
-    def balanced(self):
-        return ViewableList(self.to_list())
 
+    def balanced(self, depth_allowance_fn=lambda x : x+1):
+        '''
+        >>> l = ViewableList(None, (ViewableList([1]), ViewableList([2,3,4])))
+        >>> l.max_depth()
+        3
+        >>> l.balanced(depth_allowance_fn=_identity).max_depth()
+        2
+        >>> l == l.balanced()
+        True
+
+        >>> l = ViewableList(None, (ViewableList([1]), ViewableList([2,3])))
+        >>> l.max_depth()
+        2
+        >>> l.balanced(depth_allowance_fn=_identity).max_depth()
+        2
+        >>> l == l.balanced()
+        True
+
+        >>> l = reduce(
+        ...     lambda acc, n : ViewableList(None, (acc, ViewableList([n]))),
+        ...     range(1, 10), ViewableList([0]))
+        >>> l
+        ViewableList([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        >>> l.max_depth()
+        9
+        >>> l.balanced(depth_allowance_fn=_identity).max_depth()
+        4
+        >>> l == l.balanced()
+        True
+
+        >>> ViewableList([]).balanced()
+        ViewableList([])
+        '''
+        if self._count <= 1:
+            return self
+        perfect_depth = math.ceil(math.log(self._count, 2))
+        depth_threshold = depth_allowance_fn(perfect_depth)
+        if self._depth <= depth_threshold: # short-circuit for performance
+            return self
+        candidates = [(-self._depth, 0, self)]
+        new_levels = 0
+        while True:
+            depth = new_levels + -candidates[0][0]
+            if depth <= depth_threshold:
+                candidates.sort(key=lambda k : k[1])
+                return _treeify([v for (_, _, v) in candidates])
+            for _ in range(2 ** new_levels):
+                depth, position, largest_tree = candidates[0]
+                if depth == 0:
+                    break
+                left, right = largest_tree._left, largest_tree._right
+                position2 = position + left._count
+                heapq.heapreplace(candidates, (-left._depth, position, left))
+                heapq.heappush(candidates, (-right._depth, position2, right))
+            new_levels += 1
 
 def _identity(x):
     return x
+
+def _treeify(nodes):
+    """
+    >>> _treeify([ViewableList([0])])
+    ViewableList([0])
+    >>> _treeify([ViewableList([0]) for _ in range(3)])
+    ViewableList([0, 0, 0])
+    """
+    numnodes = len(nodes)
+    jump = 1
+    while jump < numnodes:
+        for i in range(0, numnodes, 2 * jump):
+            if i + jump < numnodes:
+                nodes[i] = ViewableList(None, (nodes[i], nodes[i + jump]))
+        jump *= 2
+    return nodes[0]
 
 _NO_VAL = object()
 
