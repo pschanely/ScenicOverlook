@@ -25,7 +25,7 @@ class ViewableList(object):
     >>> l[1:-2].map_reduce(mr)
     6
 
-    Internally, sharing_list uses a binary tree to store its values. In
+    Internally, ViewableList uses a binary tree to store its values. In
     each node, it caches results of the reduce function.
 
     Both the mapper and reducer function must be pure (they cannot modify
@@ -103,7 +103,7 @@ class ViewableList(object):
                 self._right = _treeify([ViewableList((v,)) for v in values[mid:]])
             self._count = len(values)
         if self._left is not None:
-            self._depth = 1 + max(self._left.max_depth(), self._right.max_depth())
+            self._depth = 1 + max(self._left._depth, self._right._depth)
         else:
             self._depth = 0
 
@@ -130,11 +130,12 @@ class ViewableList(object):
                 return self
             lcount = len(self._left)
             if lcount <= start:
-                return self._right[start - lcount : end - lcount]
+                result = self._right[start - lcount : end - lcount]
             elif lcount >= end:
-                return self._left[start : end]
+                result = self._left[start : end]
             else:
-                return ViewableList(None, (self._left[start:], self._right[:end - lcount]))
+                result = ViewableList(None, (self._left[start:], self._right[:end - lcount]))
+            return result.balanced()
         else:
             index = count + index if index < 0 else index
             left, right = self._left, self._right
@@ -148,16 +149,16 @@ class ViewableList(object):
             
     def __add__(self, other):
         '''
-        >>> (ViewableList([]) + ViewableList([3])).max_depth()
+        >>> (ViewableList([]) + ViewableList([3]))._depth
         0
         >>> # Target depth here is 2, actual is 3: we can be off by one level
-        >>> (ViewableList([0]) + ViewableList([1,2,3])).max_depth()
+        >>> (ViewableList([0]) + ViewableList([1,2,3]))._depth
         3
         >>> # Target depth is 3, actual is 4: we can be off by one level
-        >>> (ViewableList([0,1,2,3,4]) + ViewableList([5])).max_depth()
+        >>> (ViewableList([0,1,2,3,4]) + ViewableList([5]))._depth
         4
         >>> # Target depth is 3, actual is 5, rebalance down to 4
-        >>> (ViewableList([0,1,2,3,4]) + ViewableList([5]) + ViewableList([6])).max_depth()
+        >>> (ViewableList([0,1,2,3,4]) + ViewableList([5]) + ViewableList([6]))._depth
         4
         '''
         if not isinstance(other, ViewableList):
@@ -266,45 +267,25 @@ class ViewableList(object):
         self._reducevals[logic] = ret
         return ret
 
-    def max_depth(self):
+    def balanced(self):
         '''
-        >>> ViewableList([3]).max_depth()
-        0
-        >>> ViewableList([3,4]).max_depth()
-        1
-        >>> ViewableList([1,2,3,4]).max_depth()
-        2
-        '''
-        return self._depth
-    
-
-    def balanced(self, depth_allowance_fn=lambda x : x+1):
-        '''
-        >>> l = ViewableList(None, (ViewableList([1]), ViewableList([2,3,4])))
-        >>> l.max_depth()
-        3
-        >>> l.balanced(depth_allowance_fn=_identity).max_depth()
-        2
-        >>> l == l.balanced()
-        True
-
         >>> l = ViewableList(None, (ViewableList([1]), ViewableList([2,3])))
-        >>> l.max_depth()
+        >>> l._depth
         2
-        >>> l.balanced(depth_allowance_fn=_identity).max_depth()
+        >>> l.balanced()._depth
         2
         >>> l == l.balanced()
         True
 
         >>> l = reduce(
-        ...     lambda acc, n : ViewableList(None, (acc, ViewableList([n]))),
+        ...     lambda acc, n : ViewableList(None, (ViewableList([n]), acc)),
         ...     range(1, 10), ViewableList([0]))
         >>> l
-        ViewableList([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
-        >>> l.max_depth()
+        ViewableList([9, 8, 7, 6, 5, 4, 3, 2, 1, 0])
+        >>> l._depth
         9
-        >>> l.balanced(depth_allowance_fn=_identity).max_depth()
-        4
+        >>> l.balanced()._depth
+        5
         >>> l == l.balanced()
         True
 
@@ -314,25 +295,21 @@ class ViewableList(object):
         if self._count <= 1:
             return self
         perfect_depth = math.ceil(math.log(self._count, 2))
-        depth_threshold = depth_allowance_fn(perfect_depth)
+        depth_threshold = perfect_depth + 1
         if self._depth <= depth_threshold: # short-circuit for performance
             return self
-        candidates = [(-self._depth, 0, self)]
-        new_levels = 0
-        while True:
-            depth = new_levels + -candidates[0][0]
-            if depth <= depth_threshold:
-                candidates.sort(key=lambda k : k[1])
-                return _treeify([v for (_, _, v) in candidates])
-            for _ in range(2 ** new_levels):
-                depth, position, largest_tree = candidates[0]
-                if depth == 0:
-                    break
-                left, right = largest_tree._left, largest_tree._right
-                position2 = position + left._count
-                heapq.heapreplace(candidates, (-left._depth, position, left))
-                heapq.heappush(candidates, (-right._depth, position2, right))
-            new_levels += 1
+
+        left, right = self._left.balanced(), self._right.balanced()
+        while left._count * 2 < right._count:
+            # rotate left
+            left, right = ViewableList(None, (left, right._left)), right._right
+        while right._count * 2 < left._count:
+            # rotate right
+            left, right = left._left, ViewableList(None, (left._right, right))
+        left, right = left.balanced(), right.balanced()
+        if left is self._left and right is self._right:
+            return self
+        return ViewableList(None, (left, right))
 
 def _identity(x):
     return x
