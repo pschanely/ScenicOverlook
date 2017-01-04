@@ -5,6 +5,12 @@ import itertools
 import heapq
 import math
 
+def viewablelist(values):
+    if values:
+        return _treeify([ViewableList(v) for v in values])
+    else:
+        return ViewableList(None)
+
 @functools.total_ordering
 class ViewableList(object):
 
@@ -14,18 +20,18 @@ class ViewableList(object):
     the map/reduce can be efficiently updated. (using previous results for
     parts of the original list(s) that remain unchanged)
 
-    >>> mr = MapReduceLogic(reducer=lambda x, y: x + y, initializer=0)
-    >>> l = ViewableList([1,2,1,2,1,2,1])
-    >>> l.map_reduce(mr)
-    10
-    >>> l[2:].map_reduce(mr)
-    7
-    >>> l[:-1].map_reduce(mr)
-    9
-    >>> l[1:-2].map_reduce(mr)
-    6
+    >>> mr = MapReduceLogic(reducer=lambda x,y:x+y, initializer=0)
+    >>> numbers = viewablelist([5, 10, 5, 0])
+    >>> numbers.map_reduce(mr)
+    20
+    >>> numbers = numbers[1:]
+    >>> numbers.map_reduce(mr)
+    15
+    >>> numbers = numbers + [10, 5]
+    >>> numbers.map_reduce(mr)
+    30
 
-    Internally, ViewableList uses a binary tree to store its values. In
+    Internally, viewablelist uses a binary tree to store its values. In
     each node, it caches results of the reduce function.
 
     Both the mapper and reducer function must be pure (they cannot modify
@@ -37,7 +43,7 @@ class ViewableList(object):
     small strings:
 
     >>> mr = MapReduceLogic(reducer=lambda x, y: x + ' ' + y, initializer='')
-    >>> l = ViewableList(['the', 'quick', 'brown', 'fox'])
+    >>> l = viewablelist(['the', 'quick', 'brown', 'fox'])
     >>> l.map_reduce(mr)
     'the quick brown fox'
     >>> (l[:2] + ['stealthy'] + l[2:]).map_reduce(mr)
@@ -51,7 +57,7 @@ class ViewableList(object):
     >>> import heapq # (heapq.merge() sorts two already sorted lists)
     >>> mr = MapReduceLogic(reducer=lambda x, y: list(heapq.merge(x,y)),
     ...                     mapper=lambda x:[x], initializer=[])
-    >>> l = ViewableList([9, 3, 7, 5, 1])
+    >>> l = viewablelist([9, 3, 7, 5, 1])
     >>> l.map_reduce(mr)
     [1, 3, 5, 7, 9]
     >>> (l + [ 4 ]).map_reduce(mr)
@@ -67,7 +73,7 @@ class ViewableList(object):
     >>> import heapq
     >>> mr = MapReduceLogic(reducer=lambda x,y: list(heapq.merge(x,y))[-2:],
     ...                     mapper=lambda x:[x], initializer=[])
-    >>> l = ViewableList([9, 7, 3, 5, 1, 2, 4])
+    >>> l = viewablelist([9, 7, 3, 5, 1, 2, 4])
     >>> # window starts with first 4 elements and moves right:
     >>> l[0:4].map_reduce(mr)
     [7, 9]
@@ -86,34 +92,28 @@ class ViewableList(object):
     
     __slots__ = ('_left', '_right', '_val', '_depth', '_count','_reducevals')
 
-    def __init__(self, values=None, _pair=None):
+    def __init__(self, value=None, pair=None):
+        self._left = None
+        self._right = None
+        self._count = 0
+        self._depth = 0
         self._val = _NO_VAL
-        self._reducevals = {}
-        self._left = self._right = None
-        if _pair is not None:
-            self._left, self._right = _pair
+        if value is not None:
+            self._val = value
+            self._count = 1
+        elif pair is not None:
+            self._left, self._right = pair
             self._count = self._left._count + self._right._count
-        if values is not None:
-            if len(values) <= 1:
-                if len(values) == 1:
-                    self._val = values[0]
-            else:
-                mid = len(values) / 2
-                self._left = _treeify([ViewableList((v,)) for v in values[:mid]])
-                self._right = _treeify([ViewableList((v,)) for v in values[mid:]])
-            self._count = len(values)
-        if self._left is not None:
             self._depth = 1 + max(self._left._depth, self._right._depth)
-        else:
-            self._depth = 0
+            self._reducevals = {}
 
     def __len__(self):
         '''
-        >>> len(ViewableList([]))
+        >>> len(viewablelist([]))
         0
-        >>> len(ViewableList([1,2]))
+        >>> len(viewablelist([1,2]))
         2
-        >>> len(ViewableList([1,2]) + ViewableList([3]))
+        >>> len(viewablelist([1,2]) + viewablelist([3]))
         3
         '''
         return self._count
@@ -121,11 +121,11 @@ class ViewableList(object):
     def __getitem__(self, index):
         if isinstance(index, slice):
             if index.step is not None and index.step != 1:
-                return ViewableList(self.to_list()[index], None)
+                return viewablelist(self.to_list()[index])
             count = self._count
             start, end, _ = index.indices(count)
             if self._left is None:
-                return self if end == 1 else ViewableList(None, None)
+                return self if end == 1 else ViewableList()
             if start == 0 and end == count:
                 return self
             lcount = len(self._left)
@@ -134,7 +134,7 @@ class ViewableList(object):
             elif lcount >= end:
                 result = self._left[start : end]
             else:
-                result = ViewableList(None, (self._left[start:], self._right[:end - lcount]))
+                result = ViewableList(pair=(self._left[start:], self._right[:end - lcount]))
             return result.balanced()
         else:
             index = count + index if index < 0 else index
@@ -149,35 +149,33 @@ class ViewableList(object):
             
     def __add__(self, other):
         '''
-        >>> (ViewableList([]) + ViewableList([3]))._depth
+        >>> (viewablelist([]) + viewablelist([3]))._depth
         0
-        >>> # Target depth here is 2, actual is 3: we can be off by one level
-        >>> (ViewableList([0]) + ViewableList([1,2,3]))._depth
+        >>> (viewablelist([0]) + viewablelist([1,2,3]))._depth
         3
-        >>> # Target depth is 3, actual is 4: we can be off by one level
-        >>> (ViewableList([0,1,2,3,4]) + ViewableList([5]))._depth
+        >>> (viewablelist([0,1,2,3,4]) + viewablelist([5]))._depth
         4
-        >>> # Target depth is 3, actual is 5, rebalance down to 4
-        >>> (ViewableList([0,1,2,3,4]) + ViewableList([5]) + ViewableList([6]))._depth
-        4
+        >>> # (enough changes to trigger rebalance)
+        >>> (viewablelist([0,1,2,3,4]) + viewablelist([5]) + viewablelist([6]))._depth
+        3
         '''
         if not isinstance(other, ViewableList):
-            other = ViewableList(other, None)
+            other = viewablelist(other)
         if self._count == 0:
             return other
         if other._count == 0:
             return self
-        return ViewableList(None, (self, other)).balanced()
+        return ViewableList(pair=(self, other)).balanced()
 
     def __repr__(self):
-        return 'ViewableList({0})'.format(str(self.to_list()))
+        return 'viewablelist({0})'.format(str(self.to_list()))
 
     def __str__(self):
         return self.__repr__()
 
     def __iter__(self):
         '''
-        >>> list(ViewableList([]) + ViewableList([3]))
+        >>> list(viewablelist([]) + viewablelist([3]))
         [3]
         '''
         left, val, right = self._left, self._val, self._right
@@ -192,13 +190,13 @@ class ViewableList(object):
 
     def __eq__(self, other):
         '''
-        >>> ViewableList([]) != ViewableList([1])
+        >>> viewablelist([]) != viewablelist([1])
         True
-        >>> ViewableList([1,3]) != ViewableList([1,2])
+        >>> viewablelist([1,3]) != viewablelist([1,2])
         True
-        >>> ViewableList([1,2]) + ViewableList([3]) == ViewableList([1,2,3])
+        >>> viewablelist([1,2]) + viewablelist([3]) == viewablelist([1,2,3])
         True
-        >>> ViewableList([]) + ViewableList([3]) == ViewableList([3])
+        >>> viewablelist([]) + viewablelist([3]) == viewablelist([3])
         True
         '''
         sentinel = object()
@@ -207,25 +205,25 @@ class ViewableList(object):
 
     def __hash__(self):
         '''
-        >>> hash(ViewableList([1,2]) + ViewableList([3])) == hash(ViewableList([1,2,3]))
+        >>> hash(viewablelist([1,2]) + viewablelist([3])) == hash(viewablelist([1,2,3]))
         True
-        >>> hash(ViewableList([1])) != hash(ViewableList([2]))
+        >>> hash(viewablelist([1])) != hash(viewablelist([2]))
         True
         '''
         return hash(tuple(self.to_list()))
 
     def __lt__(self, other):
         '''
-        >>> ViewableList([]) < ViewableList([3])
+        >>> viewablelist([]) < viewablelist([3])
         True
-        >>> ViewableList([3]) < ViewableList([3])
+        >>> viewablelist([3]) < viewablelist([3])
         False
-        >>> ViewableList([4]) < ViewableList([3, 4])
+        >>> viewablelist([4]) < viewablelist([3, 4])
         False
         >>> # @functools.total_ordering gives us other comparison operators too:
-        >>> ViewableList([3]) >= ViewableList([3])
+        >>> viewablelist([3]) >= viewablelist([3])
         True
-        >>> ViewableList([3]) >= ViewableList([3, 0])
+        >>> viewablelist([3]) >= viewablelist([3, 0])
         False
         '''
         sentinel = object()
@@ -255,21 +253,23 @@ class ViewableList(object):
         return ret
 
     def map_reduce(self, logic):
-        rv = self._reducevals.get(logic, _NO_VAL)
-        if rv is not _NO_VAL:
-            return rv
         reducer, mapper, initializer = logic
         if self._count <= 1:
-            ret = mapper(self._val) if (self._count == 1) else initializer
+            # typically the mapper is not a heavy function, so we only
+            # cache the results of reduce()
+            return mapper(self._val) if (self._count == 1) else initializer
         else:
+            rv = self._reducevals.get(logic, _NO_VAL)
+            if rv is not _NO_VAL:
+                return rv
             ret = reducer(self._left.map_reduce(logic),
                           self._right.map_reduce(logic))
-        self._reducevals[logic] = ret
-        return ret
+            self._reducevals[logic] = ret
+            return ret
 
     def balanced(self):
         '''
-        >>> l = ViewableList(None, (ViewableList([1]), ViewableList([2,3])))
+        >>> l = ViewableList(pair=(viewablelist([1]), viewablelist([2,3])))
         >>> l._depth
         2
         >>> l.balanced()._depth
@@ -278,10 +278,10 @@ class ViewableList(object):
         True
 
         >>> l = reduce(
-        ...     lambda acc, n : ViewableList(None, (ViewableList([n]), acc)),
-        ...     range(1, 10), ViewableList([0]))
+        ...     lambda acc, n : ViewableList(pair=(viewablelist([n]), acc)),
+        ...     range(1, 10), viewablelist([0]))
         >>> l
-        ViewableList([9, 8, 7, 6, 5, 4, 3, 2, 1, 0])
+        viewablelist([9, 8, 7, 6, 5, 4, 3, 2, 1, 0])
         >>> l._depth
         9
         >>> l.balanced()._depth
@@ -289,8 +289,8 @@ class ViewableList(object):
         >>> l == l.balanced()
         True
 
-        >>> ViewableList([]).balanced()
-        ViewableList([])
+        >>> viewablelist([]).balanced()
+        viewablelist([])
         '''
         if self._count <= 1:
             return self
@@ -302,31 +302,31 @@ class ViewableList(object):
         left, right = self._left.balanced(), self._right.balanced()
         while left._count * 2 < right._count:
             # rotate left
-            left, right = ViewableList(None, (left, right._left)), right._right
+            left, right = ViewableList(pair=(left, right._left)), right._right
         while right._count * 2 < left._count:
             # rotate right
-            left, right = left._left, ViewableList(None, (left._right, right))
+            left, right = left._left, ViewableList(pair=(left._right, right))
         left, right = left.balanced(), right.balanced()
         if left is self._left and right is self._right:
             return self
-        return ViewableList(None, (left, right))
+        return ViewableList(pair=(left, right))
 
 def _identity(x):
     return x
 
 def _treeify(nodes):
     """
-    >>> _treeify([ViewableList([0])])
-    ViewableList([0])
-    >>> _treeify([ViewableList([0]) for _ in range(3)])
-    ViewableList([0, 0, 0])
+    >>> _treeify([viewablelist([0])])
+    viewablelist([0])
+    >>> _treeify([viewablelist([0]) for _ in range(3)])
+    viewablelist([0, 0, 0])
     """
     numnodes = len(nodes)
     jump = 1
     while jump < numnodes:
         for i in range(0, numnodes, 2 * jump):
             if i + jump < numnodes:
-                nodes[i] = ViewableList(None, (nodes[i], nodes[i + jump]))
+                nodes[i] = ViewableList(pair=(nodes[i], nodes[i + jump]))
         jump *= 2
     return nodes[0]
 
