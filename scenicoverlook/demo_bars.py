@@ -1,6 +1,5 @@
 import collections, random, sys, time
-from viewablelist import viewablelist
-from mapreducelogic import MapReduceLogic
+from scenicoverlook import viewablelist
 
 num_bars = int(sys.argv[1]) if len(sys.argv) == 2 else 25
 total_width = 500
@@ -26,11 +25,9 @@ def overlay_lines(base, overlay):
     CTR += 1
     return [base[i] if overlay[i] == ' ' else overlay[i] for i in range(80)]
 
-mr = MapReduceLogic(mapper = bar_to_line, reducer = overlay_lines)
-
 while bars:
     CTR = 0
-    line = bars.map_reduce(mr)
+    line = bars.map(bar_to_line).reduce(overlay_lines)
     print ''.join(line), '  (num bars: %05d reduces called: %03d)' %(len(bars),CTR)
     time.sleep(0.011)
     last = bars[-1]

@@ -1,6 +1,5 @@
 import numbers
-from viewablelist import viewablelist
-from mapreducelogic import MapReduceLogic
+from scenicoverlook import viewablelist
 
 #
 # This is a trivial expression evaluator.
@@ -44,14 +43,11 @@ def combine_parses(left, right):
     else: # left or right is empty; not enough data yet:
         return left + [op] + right
     
-parse_and_multiply = MapReduceLogic(
-    mapper=lambda ch: viewablelist([int(ch) if ch.isdigit() else ch]),
-    reducer=combine_parses)
-
-add_numbers = MapReduceLogic(reducer = lambda x,y:x+y)
 
 def eval(src):
-    products = src.map_reduce(parse_and_multiply)
+    tokens = src.map(
+        lambda ch: viewablelist([int(ch) if ch.isdigit() else ch]))
+    products = tokens.reduce(combine_parses)
     if products is PARSE_ERROR:
         # One might think that if you break the parse, you would lose all the
         # cached values, but this is not so. Subsections of the input that
@@ -60,7 +56,7 @@ def eval(src):
         # below.
         return PARSE_ERROR
     else:
-        return products.map_reduce(add_numbers)
+        return products.reduce(lambda x,y: x + y)
 
 # Step 1: Start with an expression like this:
 source = viewablelist('2*3*1')
