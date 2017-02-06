@@ -60,17 +60,17 @@ def eval(src):
 
 # Step 1: Start with an expression like this:
 source = viewablelist('2*3*1')
-print ' '.join(source), '=>', eval(source)
+print(' '.join(source), '=>', eval(source))
 #           2 * 3 * 1   =>   6
 
 # Step 2: Starting at the second character, type '1':
 source = source[:2] + '1' + source[2:] 
-print ' '.join(source), '=>', eval(source)
+print(' '.join(source), '=>', eval(source))
 #       2 * 1   3 * 1   =>   PARSE_ERROR (you can't have two numbers together)
 
 # Step 3: Then type '+':
 source = source[:3] + '+' + source[3:]
-print ' '.join(source), '=>', eval(source)
+print(' '.join(source), '=>', eval(source))
 #       2 * 1 + 3 * 1   =>   5
 
 

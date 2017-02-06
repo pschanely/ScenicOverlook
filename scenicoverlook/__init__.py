@@ -1,11 +1,14 @@
+from __future__ import absolute_import, division, print_function
 from collections import Mapping
 import itertools
 import functools
 import heapq
 
-from mapreducelogic import MapReduceLogic, fnkey
-
-
+zip_longest = (itertools.izip_longest if hasattr(itertools, 'izip_longest')
+               else itertools.zip_longest)
+if hasattr(functools, 'reduce'):
+    reduce = functools.reduce
+    
 #
 # Public Interfaces
 #
@@ -110,7 +113,7 @@ def viewablelist(rawlist=None):
     def _helper(start, end):
         if start >= end:
             return None
-        mid = (start + end) / 2
+        mid = (start + end) // 2
         return ViewableList(
             rawlist[mid], _helper(start, mid), _helper(mid + 1, end))
     return _helper(0, len(rawlist))
@@ -126,9 +129,9 @@ def viewabledict(given=None):
     TODO: more useful example here perhaps...
     >>> persons = viewabledict({'jim':23, 'sally':27, 'chiban':27})
     >>> def by_age(p):
-    ...   p = p.items().map(lambda (k,v): {v: [k]})
+    ...   p = p.items().map(lambda kv: {kv[1]: [kv[0]]})
     ...   return p.reduce(lambda x, y:{k: x.get(k,[]) + y.get(k,[]) 
-    ...                                for k in set(x.keys() + y.keys())})
+    ...                                for k in set(x.keys()).union(y.keys())})
     >>> by_age(persons)
     {27: ['chiban', 'sally'], 23: ['jim']}
     >>> by_age(persons + {'bill': 30})
@@ -178,14 +181,14 @@ def viewabledict(given=None):
     if isinstance(given, ViewableList):
         return _from_viewablelist(given)
     if isinstance(given, Mapping):
-        given = given.iteritems()
+        given = given.items()
     all_kv = sorted(given)
     if len(all_kv) == 0:
         return _EMPTY_DICT
     def _helper(start, end):
         if start >= end:
             return None
-        mid = (start + end) / 2
+        mid = (start + end) // 2
         k, v = all_kv[mid]
         return ViewableDict(
             k, v, _helper(start, mid), _helper(mid + 1, end))
@@ -204,7 +207,7 @@ def to_viewable(val, skip_types = ()):
     if isinstance(val, Mapping):
         return viewabledict({
             to_viewable(k, skip_types): to_viewable(v, skip_types) for
-            (k, v) in val.iteritems()
+            (k, v) in val.items()
         })
     return val
 
@@ -215,22 +218,63 @@ def from_viewable(val):
     lists and dictionaries.
     '''
     if isinstance(val, Mapping):
-        return {from_viewable(k): from_viewable(v) for k,v in val.iteritems()}
+        return {from_viewable(k): from_viewable(v) for k,v in val.items()}
     elif isinstance(val, (ViewableList, MappedList, tuple, list)):
         return tuple(from_viewable(i) for i in val)
     else:
         return val
 
-    
-    
 #
-#  Implementation: viewablelist
+#  Implementation
 #
 
+def fnkey(fn):
+    # Fancy footwork to get more precise equality checking on functions
+    # By default, inner functions and lambda are newly created each
+    # time they are evaluated.
+    # However, often they do not actually use any of the variables in
+    # their scope (the closure is empty). When this is the case, we can
+    # consider them the same if their compiled bytecode is identical
+    if fn is None:
+        return None
+    if fn.__closure__ is not None:
+        return (fn.__code__, repr([cell.cell_contents for cell in fn.__closure__]))
+    return fn
 
+class MapReduceLogic(object):
+    """
+    Instances of this class simply hold the map and reduce functions,
+    and for a defualt value when the reduce function does not have
+    enough inputs. Different instances of this class are considered
+    to be different (even if they contain the same functions), so be
+    sure to create only one per use-case, and reuse it.
+    """
+    __slots__ = ('reducer', 'mapper', 'initializer')
+    def __init__(self, reducer=None, mapper=None, initializer=None):
+        self.reducer = reducer
+        self.mapper = mapper
+        self.initializer = initializer
+    def __iter__(self):
+        return (self.reducer, self.mapper, self.initializer).__iter__()
+    def __eq__(self, other):
+        r1, m1, i1 = self
+        r2, m2, i2 = other
+        return fnkey(r1) == fnkey(r2) and fnkey(m1) == fnkey(m2) and i1 == i2
+    def __ne__(self, other):
+        return not self.__eq__(other)
+    def __hash__(self):
+        r, m, i = self
+        hsh = hash(fnkey(self.reducer))
+        hsh = hsh * 31 + hash(fnkey(self.mapper))
+        hsh = hsh * 31 + hash(self.initializer)
+        return hsh
 
 def _identity(x):
     return x
+
+#
+#  Implementation: viewablelist
+#
 
 class ViewableIterable(object):
     __slots__ = ()
@@ -403,7 +447,7 @@ class ViewableList(ViewableIterable):
         '''
         >>> list(viewablelist([]) + viewablelist([3]))
         [3]
-        >>> range(100) == list(viewablelist(range(100)))
+        >>> list(range(100)) == list(viewablelist(range(100)))
         True
         '''
         if self._count == 0:
@@ -435,7 +479,7 @@ class ViewableList(ViewableIterable):
         '''
         if not hasattr(other, '__iter__'):
             return False
-        return all(a == b for a, b in itertools.izip_longest(
+        return all(a == b for a, b in zip_longest(
             self.__iter__(), other.__iter__(), fillvalue=_NO_VAL))
 
     def __hash__(self):
@@ -468,7 +512,7 @@ class ViewableList(ViewableIterable):
         >>> bool(viewablelist([2]))
         True
         '''
-        for a, b in itertools.izip(self.__iter__(), other.__iter__()):
+        for a, b in zip(self.__iter__(), other.__iter__()):
             if a < b:
                 return True
             elif b < a:
@@ -550,7 +594,9 @@ class MappedList(ViewableIterable):
     def _realize(self):
         if self.realized is not _NO_VAL:
             return self.realized
-        logic = MapReduceLogic(mapper=self.fn, reducer=None, initializer=_EMPTY_LIST)
+        logic = MapReduceLogic(mapper=self.fn,
+                               reducer=None,
+                               initializer=_EMPTY_LIST)
         self.realized = self.inner._map_reduce(logic)
         return self.realized
 
@@ -788,7 +834,7 @@ class ViewableDict(Mapping):
         >>> l = viewabledict({1:1,2:2,3:3})
         >>> l[1], l[2], l[3]
         (1, 2, 3)
-        >>> 'p' in l, 1 in l
+        >>> 9 in l, 1 in l
         (False, True)
         '''
         key = self._key
@@ -959,13 +1005,13 @@ class ViewableDict(Mapping):
 
         >>> d = viewabledict({'name':'Bob', 'age':20})
         >>> def compute_birth(person):
-        ...   print 'Computing birth year'
+        ...   print('Computing birth year')
         ...   return person.set('birth_year', 2017 - person['age'])
-        >>> d.memoized(compute_birth)
+        >>> sorted((k,v) for k,v in d.memoized(compute_birth).items())
         Computing birth year
-        viewabledict({'age': 20, 'name': 'Bob', 'birth_year': 1997})
-        >>> d.memoized(compute_birth)  # this returns the cached value
-        viewabledict({'age': 20, 'name': 'Bob', 'birth_year': 1997})
+        [('age', 20), ('birth_year', 1997), ('name', 'Bob')]
+        >>> sorted((k,v) for k,v in d.memoized(compute_birth).items())
+        [('age', 20), ('birth_year', 1997), ('name', 'Bob')]
 
         '''
         cache = self._reducevals
@@ -994,7 +1040,7 @@ class ViewableDict(Mapping):
         '''
         if not isinstance(other, Mapping):
             return False
-        return all(a == b for a, b in itertools.izip_longest(
+        return all(a == b for a, b in zip_longest(
             self.iteritems(), other.iteritems(), fillvalue=_NO_VAL))
 
     def __hash__(self):
@@ -1249,24 +1295,24 @@ def _mergesorted(i1, i2, keyfn=_identity):
     '''
     v1, v2, _StopIteration = _NO_VAL, _NO_VAL, StopIteration
     try:
-        v1 = i1.next()
+        v1 = next(i1)
     except _StopIteration:
         pass
     try:
-        v2 = i2.next()
+        v2 = next(i2)
         if v1 is not _NO_VAL:
             while True:
                 if keyfn(v1) <= keyfn(v2):
                     yield v1
                     try:
-                        v1 = i1.next()
+                        v1 = next(i1)
                     except _StopIteration:
                         v1 = _NO_VAL
                         break
                 else:
                     yield v2
                     try:
-                        v2 = i2.next()
+                        v2 = next(i2)
                     except _StopIteration:
                         v2 = _NO_VAL
                         break
