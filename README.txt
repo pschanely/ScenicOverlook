@@ -5,25 +5,27 @@ Scenic Overlook
 The Scenic Overlook library contains datastructures for incremental
 map-reduces.
 
-These datastructures are implemented as trees, and store at each
-node, intermediate values of the reduce. This means that when you
-slice or combine structures, the new output of the map-reduce can
-be efficiently computed. (by reusing old outputs from unchanged
-parts of the tree)
+These datastructures are implemented as trees, and store at each node,
+intermediate values of the reduce. This means that when you slice or combine
+structures, the new output of the maps/reduces can be efficiently computed.
+(by reusing old outputs from unchanged parts of the tree)
 
 Typical usage looks like this::
 
     #!/usr/bin/env python
 
-    from scenicoverlook import MapReduceLogic, ViewableList
+    from scenicoverlook import viewablelist
 
-    mr = MapReduceLogic(reducer=lambda x, y: x + ' ' + y, initializer='')
-    l = ViewableList(['the', 'quick', 'brown', 'fox'])
-    print l.map_reduce(mr)                              # 'the quick brown fox'
-    print (l[:2] + ['stealthy'] + l[2:]).map_reduce(mr) # 'the quick stealthy brown fox'
+    space_concat = lambda x, y: x + ' ' + y
+    l = viewablelist(['the', 'quick', 'brown', 'fox'])
+    print l.reduce(space_concat)
+    
+    # This yields 'the quick stealthy brown fox', reusing cached intermediate
+    # substrings from the earlier call like 'the quick' and 'brown fox':
+    
+    print (l[:2] + ['stealthy'] + l[2:]).reduce(space_concat)
 
 
 See the pydocs for more examples:
 
 https://github.com/pschanely/ScenicOverlook/blob/master/scenicoverlook/__init__.py
-
