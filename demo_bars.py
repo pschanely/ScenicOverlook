@@ -28,7 +28,8 @@ def overlay_lines(base, overlay):
 while bars:
     CTR = 0
     line = bars.map(bar_to_line).reduce(overlay_lines)
-    print(''.join(line), '  (num bars: %05d reduces called: %03d)' %(len(bars),CTR))
+    print(''.join(line) +
+          '  (num bars: %05d reduces called: %03d)' % (len(bars),CTR))
     time.sleep(0.011)
     last = bars[-1]
     bars = bars[:-1]

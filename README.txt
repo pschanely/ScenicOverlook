@@ -5,6 +5,9 @@ Scenic Overlook
 The Scenic Overlook library contains datastructures for incremental
 map-reduces.
 
+You might want to read
+[my blog post about the general problem](https://hackernoon.com/computed-state-the-model-view-problem-9cbe8cf8486f).
+
 These datastructures are implemented as trees, and store at each node,
 intermediate values of the reduce. This means that when you slice or combine
 structures, the new output of the maps/reduces can be efficiently computed.

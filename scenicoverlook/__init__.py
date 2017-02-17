@@ -614,6 +614,8 @@ class MappedList(ViewableIterable):
         return self._realize().__eq__(other)
     def __lt__(self, other):
         return self._realize().__lt__(other)
+    def filter(self, fn):
+        return self._realize().filter(fn)
     def sorted(self, key=_identity):
         return self._realize().sorted(key=key)
     def reduce(self, reducer, initializer=None):
@@ -1349,6 +1351,12 @@ def _merge_sorted_lists(keyfn):
         # TODO might be nice to have a specialized version of this which
         # re-uses uninterrupted subtrees from one side; it would boost
         # lists that are mostly sorted already.
+        min1, max1 = keyfn(l1[0]), keyfn(l1[-1])
+        min2, max2 = keyfn(l2[0]), keyfn(l2[-1])
+        if max1 <= min2:
+            return l1 + l2
+        if max2 < min1: # not "<=" here because it would make the sort unstable
+            return l2 + l1
         return viewablelist(list(_mergesorted(iter(l1), iter(l2), keyfn)))
     return merge
 
