@@ -8,14 +8,14 @@ zip_longest = (itertools.izip_longest if hasattr(itertools, 'izip_longest')
                else itertools.zip_longest)
 if hasattr(functools, 'reduce'):
     reduce = functools.reduce
-    
+
 #
 # Public Interfaces
 #
 
 def viewablelist(rawlist=None):
     '''
-    This immutable list maintains the intermediate results of map/reduce 
+    This immutable list maintains the intermediate results of map/reduce
     functions so that when the list is sliced or combined, the results of
     the map/reduce can be efficiently updated. (using previous results for
     parts of the original list that remain unchanged)
@@ -48,7 +48,7 @@ def viewablelist(rawlist=None):
     'the quick brown fox'
     >>> concat(l[:2] + ['stealthy'] + l[2:])
     'the quick stealthy brown fox'
-    
+
     In this example, we maintain a sorted view of a list using the map and
     reduce functions. Now we can make make arbitraty modifications to the
     original list and the view will update efficiently. (in linear time for
@@ -88,15 +88,15 @@ def viewablelist(rawlist=None):
     >>> sorter(l[3:7])
     [4, 5]
 
-    The implementation of the backing tree (for both viewablelist and 
+    The implementation of the backing tree (for both viewablelist and
     viewabledict) is adapted from this weight-based tree implementation in
     scheme:
-    
+
     ftp://ftp.cs.indiana.edu/pub/scheme-repository/code/struct/wttree.scm
-    
+
     The tree should maintain an approximate balance under creation, slices and
     concatenation:
-    
+
     >>> viewablelist(range(100))._depth()
     7
     >>> viewablelist(range(100))[40:50]._depth()
@@ -130,17 +130,17 @@ def viewabledict(given=None):
     >>> persons = viewabledict({'jim':23, 'sally':27, 'chiban':27})
     >>> def by_age(p):
     ...   p = p.items().map(lambda kv: {kv[1]: [kv[0]]})
-    ...   return p.reduce(lambda x, y:{k: x.get(k,[]) + y.get(k,[]) 
+    ...   return p.reduce(lambda x, y:{k: x.get(k,[]) + y.get(k,[])
     ...                                for k in set(x.keys()).union(y.keys())})
     >>> by_age(persons)
     {27: ['chiban', 'sally'], 23: ['jim']}
     >>> by_age(persons + {'bill': 30})
     {27: ['chiban', 'sally'], 30: ['bill'], 23: ['jim']}
 
-    Internally, viewabledict is implemented as a binary tree, ordered by its 
+    Internally, viewabledict is implemented as a binary tree, ordered by its
     keys. In each node, it caches results of the reduce function. The standard
     sequential getters over these dictionaries (keys(), iteritems(), etc) all
-    iterate in key order. items(), keys(), and values() all return 
+    iterate in key order. items(), keys(), and values() all return
     viewablelists, which are frequently used to make further map/reduces.
 
     >>> vals = lambda l: l.values().reduce(lambda x, y: x + ' ' + y)
@@ -149,7 +149,7 @@ def viewabledict(given=None):
     'the quick brown fox'
     >>> vals(words + {2.5: 'stealthy'})
     'the quick stealthy brown fox'
-    
+
     Unlike regular python dictionaries, sub-dictionaries can be sliced from
     viewabledicts using the python slice operator, "[:]".
     It is common and efficient to split these objects with slices, like so:
@@ -165,7 +165,7 @@ def viewabledict(given=None):
     viewablelist(['jim'])
 
     viewabledicts can also be (immutably) combined with the plus operator, and
-    you can make incremental new dictionaries with the set() and remove() 
+    you can make incremental new dictionaries with the set() and remove()
     methods:
 
     >>> viewabledict({1: 1}) + viewabledict({2: 2})
@@ -193,7 +193,7 @@ def viewabledict(given=None):
         return ViewableDict(
             k, v, _helper(start, mid), _helper(mid + 1, end))
     return _helper(0, len(all_kv))
-    
+
 
 def to_viewable(val, skip_types = ()):
     '''
@@ -278,11 +278,11 @@ def _identity(x):
 
 class ViewableIterable(object):
     __slots__ = ()
-    
+
     def map(self, fn):
         '''
         Applies a (pure) function to each element of this list. All maps are
-        lazy; they will not be evaluated util the list is inspected or 
+        lazy; they will not be evaluated util the list is inspected or
         manipulated in a more complex manner.
         >>> list(viewablelist([1,2,3]).map(lambda x:x+1))
         [2, 3, 4]
@@ -292,7 +292,7 @@ class ViewableIterable(object):
         9
         '''
         return MappedList(_cached_partial(_wrap_fn_in_list, fn), self)
-    
+
     def flatmap(self, fn):
         '''
         This transforms each member of the list into zero or more members,
@@ -313,7 +313,7 @@ class ViewableIterable(object):
         '''
         Groups this list into sublists of items, I, for which keyfn(I) is
         equal. The return is a viewabledict that is keyed by keyfn(I). The
-        values are viewablelists of those items which produce the 
+        values are viewablelists of those items which produce the
         corresponding key. Within each group, the items retain the same
         ordering they had in the original list.
 
@@ -332,10 +332,10 @@ class ViewableIterable(object):
 @functools.total_ordering
 class ViewableList(ViewableIterable):
     '''
-    A tree-based implementation of a list that remembers previous 
+    A tree-based implementation of a list that remembers previous
     results of mapreduces and can re-use them for later runs.
     '''
-    
+
     __slots__ = ('_left', '_right', '_val', '_count', '_reducevals')
 
     def __init__(self, val, left, right):
@@ -419,7 +419,7 @@ class ViewableList(ViewableIterable):
         if r is not None:
             depth = max(depth, r._depth() + 1)
         return depth
-    
+
     def __add__(self, other):
         '''
         >>> (viewablelist([]) + viewablelist([3]))._depth()
@@ -429,7 +429,7 @@ class ViewableList(ViewableIterable):
         >>> (viewablelist([0,1,2,3,4]) + viewablelist([5]))._depth()
         4
         >>> # (enough changes to trigger rebalance)
-        >>> (viewablelist([0,1,2,3,4]) + viewablelist([5]) + 
+        >>> (viewablelist([0,1,2,3,4]) + viewablelist([5]) +
         ...  viewablelist([6]))._depth()
         4
         '''
@@ -465,7 +465,7 @@ class ViewableList(ViewableIterable):
 
     def __ne__(self, other):
         return not self == other
-    
+
     def __eq__(self, other):
         '''
         >>> viewablelist([]) != viewablelist([1])
@@ -546,7 +546,7 @@ class ViewableList(ViewableIterable):
                             reducer = reducer,
                             initializer = initializer)
         return self._map_reduce(mr)
-    
+
     def _map_reduce(self, logic):
         rv = self._reducevals.get(logic, _NO_VAL)
         if rv is not _NO_VAL:
@@ -609,7 +609,7 @@ class MappedList(ViewableIterable):
     def __add__(self, other):
         return self._realize().__add__(other)
     def __ne__(self, other):
-        return self._realize().__new__(other)
+        return self._realize().__ne__(other)
     def __eq__(self, other):
         return self._realize().__eq__(other)
     def __lt__(self, other):
@@ -629,7 +629,7 @@ class MappedList(ViewableIterable):
         return self.inner._map_reduce(mr)
 
 
-    
+
 #
 #  Internal tree management functions for viewablelist
 #
@@ -654,7 +654,7 @@ def _ldouble_l(av, x, r):
 def _ldouble_r(cv, l, z):
     av, x, lr = l._val, l._left, l._right
     bv, y1, y2 = lr._val, lr._left, lr._right
-    return ViewableList(bv, 
+    return ViewableList(bv,
                         ViewableList(av, x, y1),
                         ViewableList(cv, y2, z))
 
@@ -739,7 +739,7 @@ def _lsplit_gte(node, x):
         return _lconcat2(ViewableList(node._val, None, None), right)
 
 
-    
+
 #
 #  Implementation: viewabledict
 #
@@ -783,7 +783,7 @@ class ViewableDict(Mapping):
     A tree-based implementation of a dictionary that remembers previous
     results of mapreduces and can re-use them for later runs.
     '''
-    
+
     __slots__ = ('_left', '_right', '_key', '_val', '_count', '_reducevals')
 
     def __init__(self, key, val, left, right):
@@ -871,7 +871,7 @@ class ViewableDict(Mapping):
         viewabledict({3: 0, 4: 4})
         '''
         return _dadd(self, key, val)
-    
+
     def remove(self, key):
         '''
         Returns a new viewable dictionary with a given key removed.
@@ -882,7 +882,7 @@ class ViewableDict(Mapping):
         '''
         return (_dunion(_dsplit_lt(self, key), _dsplit_gt(self, key))
                 or _EMPTY_DICT)
-    
+
     def __add__(self, other):
         '''
         >>> viewabledict({3:3})._depth()
@@ -934,7 +934,7 @@ class ViewableDict(Mapping):
             cur = seconds.pop()
             yield (cur._key, cur._val)
             cur = cur._right
-    
+
     def items(self):
         '''
         >>> viewabledict({}).items()
@@ -1026,7 +1026,7 @@ class ViewableDict(Mapping):
 
     def __ne__(self, other):
         return not self == other
-    
+
     def __eq__(self, other):
         '''
         >>> viewabledict({}) == viewabledict({})
@@ -1072,23 +1072,22 @@ class ViewableDict(Mapping):
 
     def map_values(self, mapper):
         '''
-        This can be used to efficiently transform just the values of a viewable 
+        This can be used to efficiently transform just the values of a viewable
         dictionary. This specialized method exists, because we can efficiently
         recreate the same tree structure when the keys are known not to change.
-        The mapping function is given two arguments: the key and the values, 
+        The mapping function is given two arguments: the key and the values,
         and is expected to return a transformed value.
-        For other chainable transformations, use items(), keys(), or values(), 
+        For other chainable transformations, use items(), keys(), or values(),
         which all return viewable lists.
 
         >>> d = viewabledict({'chiban':7, 'bob':40})
         >>> d.map_values(lambda name, age: age + 1)
         viewabledict({'bob': 41, 'chiban': 8})
-        
         '''
         mr = MapReduceLogic(mapper=mapper,
                             reducer=None)
         return self._map_reduce(mr)
-    
+
     def _map_reduce(self, logic):
         rv = self._reducevals.get(logic, _NO_VAL)
         if rv is not _NO_VAL:
@@ -1115,7 +1114,7 @@ class ViewableDict(Mapping):
         return cur
 
 
-    
+
 #
 #  Internal tree management functions for viewabledict
 #
@@ -1140,7 +1139,7 @@ def _ddouble_l(ak, av, x, r):
 def _ddouble_r(ck, cv, l, z):
     ak, av, x, lr = l._key, l._val, l._left, l._right
     bk, bv, y1, y2 = lr._key, lr._val, lr._left, lr._right
-    return ViewableDict(bk, bv, 
+    return ViewableDict(bk, bv,
                         ViewableDict(ak, av, x, y1),
                         ViewableDict(ck, cv, y2, z))
 
@@ -1328,7 +1327,7 @@ def _mergesorted(i1, i2, keyfn=_identity):
         yield v2
         for v in i2:
             yield v
-        
+
 def _create_group(keyfn):
     return lambda val: viewabledict({keyfn(val): _l(val)})
 
@@ -1345,7 +1344,7 @@ def _combine_groups(groups1, groups2):
     if prev_key is not _NO_VAL:
         result.append((prev_key, prev_values))
     return viewabledict(result)
-    
+
 def _merge_sorted_lists(keyfn):
     def merge(l1, l2):
         # TODO might be nice to have a specialized version of this which
@@ -1377,4 +1376,3 @@ _EMPTY_DICT = ViewableDict(_NO_VAL, _NO_VAL, None, None)
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
-    
